@@ -96,6 +96,15 @@ GstPadProbeReturn UvxGstPipelineVR::buffer_pad_probe_cb_REC_timer(GstPad *pad, G
         gst_bin_remove_many(GST_BIN(pVR->pipeline), pVR->queue1, pVR->converter1, pVR->encoder1, pVR->parse1, pVR->muxer1, pVR->sink1, NULL);
 
         pVR->recState = REC_STOPPED;
+        
+        if ( pVR->recFileNum == 999 )
+        {
+            delete[] pVR->recFileNumFmt;
+            pVR->recFileNumFmt = new gchar[3];
+            strcpy(pVR->recFileNumFmt, "%d");
+            g_print("Recording file number format specifier changed to %s!\n", pVR->recFileNumFmt);
+        }
+
         pVR->recFileNum++;
         pVR->recStopEosReceived = FALSE;
         g_source_remove(pVR->freespaceWatchdogPid);
@@ -127,8 +136,18 @@ GstPadProbeReturn UvxGstPipelineVR::buffer_pad_probe_cb_REC_timer(GstPad *pad, G
     MM = ((guint)(recTime / ((GstClockTime)60000000000))) % ((guint)3600);
     SS = ((guint)(recTime / ((GstClockTime)1000000000))) % ((guint)60);
 
-    g_object_set(pVR->textoverlay0, "text", g_strconcat("REC", g_strdup_printf("%d", pVR->recFileNum), " " , g_strdup_printf("%02d", HH), ":", g_strdup_printf("%02d", MM), ":", g_strdup_printf("%02d", SS), NULL), NULL);
+    gchar* fnum = g_strdup_printf("%d", pVR->recFileNum);
+    gchar* hours = g_strdup_printf("%02d", HH);
+    gchar* mins = g_strdup_printf("%02d", MM);
+    gchar* secs = g_strdup_printf("%02d", SS);
+    gchar* recTim = g_strconcat("REC", fnum, " " , hours, ":", mins, ":", secs, NULL);
+    g_object_set(pVR->textoverlay0, "text", recTim, NULL);
 
+    g_free(fnum);
+    g_free(hours);
+    g_free(mins);
+    g_free(secs);
+    g_free(recTim);
     return GST_PAD_PROBE_PASS;
 }
 
@@ -305,7 +324,7 @@ gboolean UvxGstPipelineVR::handle_input_commands(GIOChannel *source, GIOConditio
 // Create the recording branch elements
 gboolean UvxGstPipelineVR::create_recording_branch()
 {
-    gchar *recFileName;
+    gchar *recFileName, *recLoc;
     g_print("Creating recording branch elements...\n");
     queue1 = gst_element_factory_make ("queue", "queue1");
     converter1 = gst_element_factory_make("nvvidconv", "converter1");
@@ -319,9 +338,10 @@ gboolean UvxGstPipelineVR::create_recording_branch()
         return FALSE;
     }
     
-    recFileName = g_strconcat(REC_FILENAME_PREFIX, g_strdup_printf("%03d", recFileNum), ".mp4", NULL);
+    recFileName = get_rec_filename(recFileNum);
     g_object_set(encoder1, "qp-range", REC_QP_RANGE, NULL);
-    g_object_set(sink1, "location", g_strconcat(recLocation, recFileName, NULL), NULL);
+    recLoc = g_strconcat(recLocation, recFileName, NULL);
+    g_object_set(sink1, "location", recLoc, NULL);
 
     gst_bin_add_many(GST_BIN(pipeline), queue1, converter1, encoder1, parse1, muxer1, sink1, NULL);
     gst_element_set_state(queue1, GST_STATE_NULL);
@@ -355,6 +375,9 @@ gboolean UvxGstPipelineVR::create_recording_branch()
 
     // Get "Request" pad from the tee element
     tee_out1 = gst_element_get_request_pad(tee, "src_%u");
+
+    g_free(recFileName);
+    g_free(recLoc);
     return TRUE;
 }
 
@@ -367,7 +390,7 @@ gboolean UvxGstPipelineVR::init_pipeline()
     update_available_space_bytes();
     if ( availRecSpaceBytes < FREE_SPACE_RSRV_BYTES )
     {
-        g_print("Not enough space left for recording at location %s - minimum required available space is %lu bytes. Recording disabled!\n",
+        g_print("Not enough space left for recording at location %s - minimum required available space is %lu bytes\n",
                 recLocation, FREE_SPACE_RSRV_BYTES);
         recEnabled = FALSE;
     }
@@ -377,9 +400,12 @@ gboolean UvxGstPipelineVR::init_pipeline()
         g_print("\tFilesystem block size = %lu\n", fsStatus.f_bsize);
         g_print("\tFree blocks = %ld\n", fsStatus.f_bfree);
         g_print("\tFree blocks for unprivileged users = %ld\n", fsStatus.f_bavail);
-        g_print("Available recording space at %s is %lu bytes. Recording is enabled!\n", recLocation, availRecSpaceBytes);
+        g_print("Available recording space at %s is %lu bytes\n", recLocation, availRecSpaceBytes);
         recEnabled = TRUE;
     }
+
+    // Initialize the recording file number
+    init_rec_filenumber();
 
     // Create the elements
     g_print("Creating visualization elements...\n");
@@ -399,17 +425,20 @@ gboolean UvxGstPipelineVR::init_pipeline()
     }
 
     // Configure elements
+    gchar *overlay_res_w = g_strdup_printf("%d", OVERLAY_RES_W);
+    gchar *overlay_res_h = g_strdup_printf("%d", OVERLAY_RES_H);
+    gchar *caps_convrt0 = g_strconcat("video/x-raw(memory:NVMM), width=(int)", overlay_res_w, ", height=(int)", overlay_res_h, ", format=(string)", OUT_PIX_FMT, NULL);
+    gchar *rec_res_w = g_strdup_printf("%d", REC_RES_W);
+    gchar *rec_res_h = g_strdup_printf("%d", REC_RES_H);
+    gchar *caps_convrt1 = g_strconcat("video/x-raw(memory:NVMM), width=(int)", rec_res_w, ", height=(int)", rec_res_h, ", format=(string)", OUT_PIX_FMT, NULL);
+
     g_object_set(videosource, "device", CAPTURE_DEV, NULL);
     g_object_set(tee, "allow-not-linked", TRUE, NULL);
     g_object_set(textoverlay0, "text", "", "silent", TRUE, "color", REC_TEXT_COLOR_ARGB, "draw-shadow", FALSE, "valignment", 2, "halignment", 0, "font-desc", REC_TEXT_FONT, NULL);
     g_object_set(sink0, "overlay-x", OVERLAY_POS_X, "overlay-y", OVERLAY_POS_Y, "overlay-w", OVERLAY_RES_W, "overlay-h", OVERLAY_RES_H, "sync", FALSE, NULL);
     sourceCaps = gst_caps_new_simple("video/x-raw", "format", G_TYPE_STRING, IN_PIX_FMT, "width", G_TYPE_INT, REC_RES_W, "height", G_TYPE_INT, REC_RES_H, NULL);
-    convrt0Caps = gst_caps_from_string(g_strconcat("video/x-raw(memory:NVMM), width=(int)", g_strdup_printf("%d", OVERLAY_RES_W),
-                                                    ", height=(int)", g_strdup_printf("%d", OVERLAY_RES_H),
-                                                    ", format=(string)", OUT_PIX_FMT, NULL));    
-    convrt1Caps = gst_caps_from_string(g_strconcat("video/x-raw(memory:NVMM), width=(int)", g_strdup_printf("%d", REC_RES_W),
-                                                    ", height=(int)", g_strdup_printf("%d", REC_RES_H),
-                                                    ", format=(string)", OUT_PIX_FMT, NULL));
+    convrt0Caps = gst_caps_from_string(caps_convrt0);
+    convrt1Caps = gst_caps_from_string(caps_convrt1);
 
     // Create the visualization branch
     gst_bin_add_many(GST_BIN(pipeline), videosource, tee, queue0, textoverlay0, converter0, sink0, NULL);
@@ -453,6 +482,14 @@ gboolean UvxGstPipelineVR::init_pipeline()
 
     // Get pad for PTS offset while recording
     queue0_out = gst_element_get_static_pad(queue0, "src");
+
+    // Free temporary arrays
+    g_free(overlay_res_w);
+    g_free(overlay_res_h);
+    g_free(caps_convrt0);
+    g_free(rec_res_w);
+    g_free(rec_res_h);
+    g_free(caps_convrt1);
 
     // Create streaming branch and exit
     return create_streaming_branch();
@@ -509,6 +546,7 @@ void UvxGstPipelineVR::unref_pipeline()
     gst_object_unref(pipeline);
     g_main_loop_unref(loopMain);
     g_io_channel_unref(io_stdin);
+    delete[] recFileNumFmt;
 }
 
 // Update the available disk space at the recording location
@@ -533,4 +571,81 @@ void UvxGstPipelineVR::update_rec_enabled()
         recEnabled = FALSE;
     else
         recEnabled = TRUE;
+}
+
+// Get a recording filename with a specified file number
+gchar* UvxGstPipelineVR::get_rec_filename(guint fileNum)
+{
+    gchar* temp = g_strdup_printf(recFileNumFmt, fileNum);
+    gchar* ret = g_strconcat(REC_FILENAME_PREFIX, temp, ".mp4", NULL);
+    g_free(temp);
+    return ret;
+}
+
+// Get a recording filename as a regular expression
+gchar* UvxGstPipelineVR::get_rec_filename()
+{
+    return g_strconcat(REC_FILENAME_PREFIX, "([0-9]+)\\.mp4", NULL);
+}
+
+// Initialize the recording file number
+void UvxGstPipelineVR::init_rec_filenumber()
+{
+    GDir *recDir;
+    gchar *temp;
+    const gchar *filename;
+    guint fnum_max = 0;
+
+    g_print("Initializing recording file number...\n");
+    recDir = g_dir_open(get_recording_location(), 0, NULL);
+
+    if (!recDir)
+    {
+        g_print("Error opening recording location %s\n", get_recording_location());
+    }
+    else
+    {
+        GRegex *regex_match;
+        gchar *reg_pattern = get_rec_filename();
+        regex_match = g_regex_new(reg_pattern, (GRegexCompileFlags)0, (GRegexMatchFlags)0, NULL);
+
+        while ( ( filename = g_dir_read_name(recDir) ) )
+        {
+            // Go through each file in the recording location and check it for regex matching
+            if ( g_regex_match(regex_match, filename, (GRegexMatchFlags)0, NULL) )
+            {
+                // Match found - get the file number
+                gchar **part = g_regex_split(regex_match, filename, (GRegexMatchFlags)0);
+                guint fnum = atoi(part[1]);
+
+                if ( fnum > fnum_max )
+                    fnum_max = fnum;
+
+                g_strfreev(part);
+            }
+        }
+        
+        g_regex_unref(regex_match);
+        g_free(reg_pattern);
+        g_dir_close(recDir);
+    }
+
+    recFileNum = fnum_max + 1;
+
+    // Set the file number display format
+    if ( recFileNum > 999 )
+    {
+        recFileNumFmt = new gchar[3];
+        strcpy(recFileNumFmt, "%d");
+    }
+    else
+    {
+        recFileNumFmt = new gchar[5];
+        strcpy(recFileNumFmt, "%03d");
+    }
+
+    temp = g_strdup_printf(recFileNumFmt, recFileNum);
+    g_print("Format specifier set to %s\n", recFileNumFmt);
+    g_print("Recording file number initialized to %s\n", temp);
+    g_free(temp);
 }

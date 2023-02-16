@@ -44,10 +44,10 @@ public:
     gulong get_available_space_bytes() const { return availRecSpaceBytes; }
 
     // Get recording location
-    char* get_recording_location() { return recLocation; }
+    gchar* get_recording_location() { return recLocation; }
 
     // Set recording location
-    void set_recording_location(char *recLoc ) { recLocation = recLoc; }
+    void set_recording_location(char *recLoc) { recLocation = recLoc; }
 
 protected:
     // Update the available disk space at the recording location
@@ -64,6 +64,15 @@ protected:
 
     // Free streaming branch resources
     virtual gboolean unref_streaming_branch() { return TRUE; }
+
+    // Get a recording filename with a specified file number
+    gchar* get_rec_filename(guint fileNum);
+
+    // Get a recording filename as a regular expression
+    gchar* get_rec_filename();
+
+    // Initialize the recording file number
+    void init_rec_filenumber();
 
     // Start recording command
     void start_recording();
@@ -112,7 +121,7 @@ protected:
     struct statvfs fsStatus;
 
     // Recording location
-    char *recLocation;
+    gchar *recLocation;
 
     // Livestream detected status flag
     gboolean isLivestream = FALSE;
@@ -128,6 +137,9 @@ protected:
 
     // Recording file number
     guint recFileNum = 1;
+
+    // Recording file number format
+    gchar *recFileNumFmt;
 
     // Freespace watchdog callback process ID
     guint freespaceWatchdogPid = 0;
