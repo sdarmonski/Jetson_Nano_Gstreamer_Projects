@@ -29,7 +29,10 @@ int main(int argc, char *argv[])
 
     // Set recording location
     pgst.set_recording_location(argv[1]);
-    g_print("Recording location set to %s\n", pgst.get_recording_location());
+
+    // Set configuration parameters file
+    if (argv[2])
+        pgst.set_configuration_file(argv[2]);
 
     // Initialize pipeline
     if ( !pgst.init_pipeline() )

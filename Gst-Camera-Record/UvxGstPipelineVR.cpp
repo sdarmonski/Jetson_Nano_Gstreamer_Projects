@@ -66,7 +66,7 @@ gboolean UvxGstPipelineVR::freespace_watchdog(gpointer pobject)
     {
         // Update the available space for recording
         pVR->update_available_space_bytes();
-        if ( pVR->availRecSpaceBytes < FREE_SPACE_RSRV_BYTES )
+        if ( pVR->availRecSpaceBytes < pVR->freeSpaceRsrvBytes )
         {
             g_print("Low diskspace at location %s - stopping the recording!\n", pVR->recLocation);
             pVR->stop_recording();
@@ -125,7 +125,7 @@ GstPadProbeReturn UvxGstPipelineVR::buffer_pad_probe_cb_REC_timer(GstPad *pad, G
     {
         g_print("Recording started!\n");
         g_object_set(pVR->textoverlay0, "silent", FALSE, NULL);
-        pVR->freespaceWatchdogPid = g_timeout_add_seconds(FREESPACE_WDOG_TIMOUT_S, (GSourceFunc)freespace_watchdog, (gpointer)pVR);
+        pVR->freespaceWatchdogPid = g_timeout_add_seconds(atoi(pVR->cfgParams[FREESPACE_WDOG_TIMOUT_S].c_str()), (GSourceFunc)freespace_watchdog, (gpointer)pVR);
         pVR->recState = REC_STARTED;
         pVR->recInitPts = GST_BUFFER_PTS(buffer);
     }
@@ -133,7 +133,7 @@ GstPadProbeReturn UvxGstPipelineVR::buffer_pad_probe_cb_REC_timer(GstPad *pad, G
     // Calculate and display the recording time
     recTime = GST_BUFFER_PTS(buffer) - pVR->recInitPts;
     HH = (guint)(recTime / ((GstClockTime)3600000000000));
-    MM = ((guint)(recTime / ((GstClockTime)60000000000))) % ((guint)3600);
+    MM = ((guint)(recTime / ((GstClockTime)60000000000))) % ((guint)60);
     SS = ((guint)(recTime / ((GstClockTime)1000000000))) % ((guint)60);
 
     gchar* fnum = g_strdup_printf("%d", pVR->recFileNum);
@@ -215,7 +215,7 @@ GstPadProbeReturn UvxGstPipelineVR::pad_probe_cb(GstPad *pad, GstPadProbeInfo *i
         }
         else
         {
-            g_print("EOS sent.\n");
+            g_print("EOS sent...\n");
             gst_element_release_request_pad(pVR->tee, pVR->tee_out1);
             gst_object_unref(pVR->tee_out1);
         }
@@ -339,7 +339,7 @@ gboolean UvxGstPipelineVR::create_recording_branch()
     }
     
     recFileName = get_rec_filename(recFileNum);
-    g_object_set(encoder1, "qp-range", REC_QP_RANGE, NULL);
+    g_object_set(encoder1, "qp-range", cfgParams[REC_QP_RANGE].c_str(), NULL);
     recLoc = g_strconcat(recLocation, recFileName, NULL);
     g_object_set(sink1, "location", recLoc, NULL);
 
@@ -385,22 +385,24 @@ gboolean UvxGstPipelineVR::create_recording_branch()
 gboolean UvxGstPipelineVR::init_pipeline()
 {
     g_print("Initializing new pipeline...\n");
+    init_parameters();
+    g_print("Recording location set to %s\n", get_recording_location());
 
     // Check the available space for recording
+    freeSpaceRsrvBytes = (gulong)atol(cfgParams[FREE_SPACE_RSRV_BYTES].c_str());
     update_available_space_bytes();
-    if ( availRecSpaceBytes < FREE_SPACE_RSRV_BYTES )
+    if ( availRecSpaceBytes < freeSpaceRsrvBytes )
     {
-        g_print("Not enough space left for recording at location %s - minimum required available space is %lu bytes\n",
-                recLocation, FREE_SPACE_RSRV_BYTES);
+        g_print("Not enough space left for recording - minimum required available space is %lu bytes\n", freeSpaceRsrvBytes);
         recEnabled = FALSE;
     }
     else
     {
-        g_print("Statistics for recording location %s\n", recLocation);
+        g_print("Statistics for recording location:\n");
         g_print("\tFilesystem block size = %lu\n", fsStatus.f_bsize);
         g_print("\tFree blocks = %ld\n", fsStatus.f_bfree);
         g_print("\tFree blocks for unprivileged users = %ld\n", fsStatus.f_bavail);
-        g_print("Available recording space at %s is %lu bytes\n", recLocation, availRecSpaceBytes);
+        g_print("Available recording space is %lu bytes\n", availRecSpaceBytes);
         recEnabled = TRUE;
     }
 
@@ -425,18 +427,28 @@ gboolean UvxGstPipelineVR::init_pipeline()
     }
 
     // Configure elements
-    gchar *overlay_res_w = g_strdup_printf("%d", OVERLAY_RES_W);
-    gchar *overlay_res_h = g_strdup_printf("%d", OVERLAY_RES_H);
-    gchar *caps_convrt0 = g_strconcat("video/x-raw(memory:NVMM), width=(int)", overlay_res_w, ", height=(int)", overlay_res_h, ", format=(string)", OUT_PIX_FMT, NULL);
-    gchar *rec_res_w = g_strdup_printf("%d", REC_RES_W);
-    gchar *rec_res_h = g_strdup_printf("%d", REC_RES_H);
-    gchar *caps_convrt1 = g_strconcat("video/x-raw(memory:NVMM), width=(int)", rec_res_w, ", height=(int)", rec_res_h, ", format=(string)", OUT_PIX_FMT, NULL);
+    gchar *caps_convrt0 = g_strconcat("video/x-raw(memory:NVMM), width=(int)", cfgParams[OVERLAY_RES_W].c_str(),
+                                      ", height=(int)", cfgParams[OVERLAY_RES_H].c_str(),
+                                      ", format=(string)", cfgParams[OUT_PIX_FMT].c_str(), NULL);
 
-    g_object_set(videosource, "device", CAPTURE_DEV, NULL);
+    gchar *caps_convrt1 = g_strconcat("video/x-raw(memory:NVMM), width=(int)", cfgParams[REC_RES_W].c_str(),
+                                      ", height=(int)", cfgParams[REC_RES_H].c_str(),
+                                      ", format=(string)", cfgParams[OUT_PIX_FMT].c_str(), NULL);
+
+    g_object_set(videosource, "device", cfgParams[CAPTURE_DEV].c_str(), NULL);
     g_object_set(tee, "allow-not-linked", TRUE, NULL);
-    g_object_set(textoverlay0, "text", "", "silent", TRUE, "color", REC_TEXT_COLOR_ARGB, "draw-shadow", FALSE, "valignment", 2, "halignment", 0, "font-desc", REC_TEXT_FONT, NULL);
-    g_object_set(sink0, "overlay-x", OVERLAY_POS_X, "overlay-y", OVERLAY_POS_Y, "overlay-w", OVERLAY_RES_W, "overlay-h", OVERLAY_RES_H, "sync", FALSE, NULL);
-    sourceCaps = gst_caps_new_simple("video/x-raw", "format", G_TYPE_STRING, IN_PIX_FMT, "width", G_TYPE_INT, REC_RES_W, "height", G_TYPE_INT, REC_RES_H, NULL);
+    g_object_set(textoverlay0, "text", "", "silent", TRUE, "color", (guint)atoi(cfgParams[REC_TEXT_COLOR_ARGB].c_str()),
+                               "draw-shadow", FALSE, "valignment", 2, "halignment", 0,
+                               "font-desc", cfgParams[REC_TEXT_FONT].c_str(), NULL);
+    
+    g_object_set(sink0, "overlay-x", atoi(cfgParams[OVERLAY_POS_X].c_str()), "overlay-y", atoi(cfgParams[OVERLAY_POS_Y].c_str()),
+                        "overlay-w", (guint)atoi(cfgParams[OVERLAY_RES_W].c_str()), "overlay-h", (guint)atoi(cfgParams[OVERLAY_RES_H].c_str()),
+                        "sync", FALSE, NULL);
+    
+    sourceCaps = gst_caps_new_simple("video/x-raw", "format", G_TYPE_STRING, cfgParams[IN_PIX_FMT].c_str(),
+                                     "width", G_TYPE_INT, atoi(cfgParams[REC_RES_W].c_str()),
+                                     "height", G_TYPE_INT, atoi(cfgParams[REC_RES_H].c_str()), NULL);
+    
     convrt0Caps = gst_caps_from_string(caps_convrt0);
     convrt1Caps = gst_caps_from_string(caps_convrt1);
 
@@ -484,11 +496,7 @@ gboolean UvxGstPipelineVR::init_pipeline()
     queue0_out = gst_element_get_static_pad(queue0, "src");
 
     // Free temporary arrays
-    g_free(overlay_res_w);
-    g_free(overlay_res_h);
     g_free(caps_convrt0);
-    g_free(rec_res_w);
-    g_free(rec_res_h);
     g_free(caps_convrt1);
 
     // Create streaming branch and exit
@@ -567,7 +575,7 @@ void UvxGstPipelineVR::update_available_space_bytes()
 void UvxGstPipelineVR::update_rec_enabled()
 {
     update_available_space_bytes();
-    if ( availRecSpaceBytes < FREE_SPACE_RSRV_BYTES )
+    if ( availRecSpaceBytes < freeSpaceRsrvBytes )
         recEnabled = FALSE;
     else
         recEnabled = TRUE;
@@ -577,7 +585,7 @@ void UvxGstPipelineVR::update_rec_enabled()
 gchar* UvxGstPipelineVR::get_rec_filename(guint fileNum)
 {
     gchar* temp = g_strdup_printf(recFileNumFmt, fileNum);
-    gchar* ret = g_strconcat(REC_FILENAME_PREFIX, temp, ".mp4", NULL);
+    gchar* ret = g_strconcat(cfgParams[REC_FILENAME_PREFIX].c_str(), temp, ".mp4", NULL);
     g_free(temp);
     return ret;
 }
@@ -585,7 +593,7 @@ gchar* UvxGstPipelineVR::get_rec_filename(guint fileNum)
 // Get a recording filename as a regular expression
 gchar* UvxGstPipelineVR::get_rec_filename()
 {
-    return g_strconcat(REC_FILENAME_PREFIX, "([0-9]+)\\.mp4", NULL);
+    return g_strconcat(cfgParams[REC_FILENAME_PREFIX].c_str(), "([0-9]+)\\.mp4", NULL);
 }
 
 // Initialize the recording file number
@@ -648,4 +656,133 @@ void UvxGstPipelineVR::init_rec_filenumber()
     g_print("Format specifier set to %s\n", recFileNumFmt);
     g_print("Recording file number initialized to %s\n", temp);
     g_free(temp);
+}
+
+// Initialize the configuration parameters
+void UvxGstPipelineVR::init_parameters()
+{
+    fstream gstSetupFile;
+    string line;
+    string parameter;
+    string value;
+    size_t pequals, pquoute;
+    map<string,int> M;
+
+    // Create the default parameters map
+    cfgParams[CAPTURE_DEV] = "/dev/video0";
+    cfgParams[IN_PIX_FMT] = "UYVY";
+    cfgParams[OUT_PIX_FMT] = "I420";
+    cfgParams[STREAMING_ENABLED] = "FALSE";
+    cfgParams[STREAM_QP_RANGE] = "35,35:35,35:-1,-1";
+    cfgParams[STREAM_MTU] = "60000";
+    cfgParams[STREAM_RES_W] = "640";
+    cfgParams[STREAM_RES_H] = "480";
+    cfgParams[HOST_IP] = "192.168.88.91";
+    cfgParams[HOST_PORT] = "5000";
+    cfgParams[REC_RES_W] = "1920";
+    cfgParams[REC_RES_H] = "1080";
+    cfgParams[REC_QP_RANGE] = "20,20:20,20:-1,-1";
+    cfgParams[REC_FILENAME_PREFIX] = "UVX-";
+    cfgParams[REC_FILE_SIZE_BYTES] = "1073741824";
+    cfgParams[FREE_SPACE_RSRV_BYTES] = "1073741824";
+    cfgParams[REC_TEXT_COLOR_ARGB] = "4294901760";
+    cfgParams[REC_TEXT_FONT] = "Sans, 6";
+    cfgParams[OVERLAY_RES_W] = "1280";
+    cfgParams[OVERLAY_RES_H] = "720";
+    cfgParams[OVERLAY_POS_X] = "0";
+    cfgParams[OVERLAY_POS_Y] = "0";
+    cfgParams[FREESPACE_WDOG_TIMOUT_S] = "20";
+
+    // Create the map from the parameter names to their internal enumeration representation
+    M["CAPTURE_DEV"] = CAPTURE_DEV;
+    M["IN_PIX_FMT"] = IN_PIX_FMT;
+    M["OUT_PIX_FMT"] = OUT_PIX_FMT;
+    M["STREAMING_ENABLED"] = STREAMING_ENABLED;
+    M["STREAM_QP_RANGE"] = STREAM_QP_RANGE;
+    M["STREAM_MTU"] = STREAM_MTU;
+    M["STREAM_RES_W"] = STREAM_RES_W;
+    M["STREAM_RES_H"] = STREAM_RES_H;
+    M["HOST_IP"] = HOST_IP;
+    M["HOST_PORT"] = HOST_PORT;
+    M["REC_RES_W"] = REC_RES_W;
+    M["REC_RES_H"] = REC_RES_H;
+    M["REC_QP_RANGE"] = REC_QP_RANGE;
+    M["REC_FILENAME_PREFIX"] = REC_FILENAME_PREFIX;
+    M["REC_FILE_SIZE_BYTES"] = REC_FILE_SIZE_BYTES;
+    M["FREE_SPACE_RSRV_BYTES"] = FREE_SPACE_RSRV_BYTES;
+    M["REC_TEXT_COLOR_ARGB"] = REC_TEXT_COLOR_ARGB;
+    M["REC_TEXT_FONT"] = REC_TEXT_FONT;
+    M["OVERLAY_RES_W"] = OVERLAY_RES_W;
+    M["OVERLAY_RES_H"] = OVERLAY_RES_H;
+    M["OVERLAY_POS_X"] = OVERLAY_POS_X;
+    M["OVERLAY_POS_Y"] = OVERLAY_POS_Y;
+    M["FREESPACE_WDOG_TIMOUT_S"] = FREESPACE_WDOG_TIMOUT_S;
+
+    if (!cfgParamsFile)
+    {
+        g_print("No configuration parameters file specified. Default parameter set will be used!\n");
+        goto exit;
+    }
+
+    // Process the configuration parameters file
+    g_print("Configuration parameters file set to %s. Processing...\n", cfgParamsFile);
+    gstSetupFile.open(cfgParamsFile, ios::in);
+
+    if ( !gstSetupFile.is_open() )
+    {
+        g_printerr("Failed opening configuration file %s. Default parameter set will be used!\n", cfgParamsFile);
+        goto exit;
+    }
+
+    while ( getline(gstSetupFile, line) )
+    {
+        try {
+            if ( line.at(0) == '#')
+                continue; // Skip comments
+
+            pequals = line.find('=');
+            if ( (pequals + 3) > line.length() )
+                continue; // Skip invalid lines
+
+            if ( line.at(pequals+1) != '"' )
+                continue; // Skip invalid lines - the equals sign must be followed by a quoute
+
+            // Find the position of the second quoute
+            pquoute = line.find('"',pequals+2);
+            if ( ((pquoute + 1) > line.length()) || (pquoute < (pequals + 2)) )
+                continue; // Skip invalid lines
+
+            // Get the parameter
+            parameter = line.substr(0, pequals);
+
+            // Search for the parameter in the map
+            if ( M.find(parameter) == M.end() )
+                continue; // Parameter not found in map
+            
+            // Get the number of characters for the value
+            size_t numch = pquoute - (pequals + 2);
+            if ( numch > 0 )
+            {
+                // Set the value of the parameter
+                value = line.substr(pequals+2, numch);
+                cfgParams[M[parameter]] = value;
+                // g_print("Parameter %s set to %s\n", parameter.c_str(), cfgParams[M[parameter]].c_str());
+            }
+            // else -> the parameter value is empty
+        } catch ( std::out_of_range ) {
+            // Skip the eronous line
+            continue;
+        }
+    }
+    
+    gstSetupFile.close();
+
+exit:
+    // Print the resulting configuration parameters
+    auto it = M.begin();
+    while (it != M.end())
+    {
+        g_print("\tParameter %s set to %s\n", it->first.c_str(), cfgParams[it->second].c_str());
+        it++;
+    }
 }

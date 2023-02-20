@@ -21,6 +21,32 @@ Copyright (c) 2023 Stanislav Darmonski s.darmonski@gmail.com
 class UvxGstPipelineVR : public UvxGstPipeline
 {
 public:
+    enum CfgParamsKeys {
+        CAPTURE_DEV,
+        IN_PIX_FMT,
+        OUT_PIX_FMT,
+        STREAMING_ENABLED,
+        STREAM_QP_RANGE,
+        STREAM_MTU,
+        STREAM_RES_W,
+        STREAM_RES_H,
+        HOST_IP,
+        HOST_PORT,
+        REC_RES_W,
+        REC_RES_H,
+        REC_QP_RANGE,
+        REC_FILENAME_PREFIX,
+        REC_FILE_SIZE_BYTES,
+        FREE_SPACE_RSRV_BYTES,
+        REC_TEXT_COLOR_ARGB,
+        REC_TEXT_FONT,
+        OVERLAY_RES_W,
+        OVERLAY_RES_H,
+        OVERLAY_POS_X,
+        OVERLAY_POS_Y,
+        FREESPACE_WDOG_TIMOUT_S
+    };
+
     typedef enum {
         REC_STOPPED,
         REC_STARTED,
@@ -47,9 +73,15 @@ public:
     gchar* get_recording_location() { return recLocation; }
 
     // Set recording location
-    void set_recording_location(char *recLoc) { recLocation = recLoc; }
+    void set_recording_location(gchar *recLoc) { recLocation = recLoc; }
+
+    // Set configuration parameters file
+    void set_configuration_file(gchar *paramsFile) { cfgParamsFile = paramsFile; }
 
 protected:
+    // Initialize the configuration parameters
+    void init_parameters();
+
     // Update the available disk space at the recording location
     void update_available_space_bytes();
 
@@ -111,6 +143,9 @@ protected:
     // Capabilities for the source and converter elements
     GstCaps *sourceCaps, *convrt0Caps, *convrt1Caps;
 
+    // Pipeline configuration parameters
+    map<int, string> cfgParams;
+
     // Initial timestamp used for recording timer display
     GstClockTime recInitPts;
 
@@ -123,6 +158,9 @@ protected:
     // Recording location
     gchar *recLocation;
 
+    // Configuration parameters file
+    gchar *cfgParamsFile = NULL;
+
     // Livestream detected status flag
     gboolean isLivestream = FALSE;
 
@@ -134,6 +172,9 @@ protected:
 
     // Available space for recording in bytes
     gulong availRecSpaceBytes;
+
+    // Reserved free space in bytes
+    gulong freeSpaceRsrvBytes = 0;
 
     // Recording file number
     guint recFileNum = 1;
