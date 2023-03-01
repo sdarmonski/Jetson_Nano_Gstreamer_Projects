@@ -23,6 +23,9 @@ class UvxGstPipelineVR : public UvxGstPipeline
 public:
     enum CfgParamsKeys {
         CAPTURE_DEV,
+        CAMERA_START_REC_HOTKEY,
+        CAMERA_STOP_REC_HOTKEY,
+        CAMERA_QUIT_HOTKEY,
         IN_PIX_FMT,
         OUT_PIX_FMT,
         STREAMING_ENABLED,

@@ -300,21 +300,16 @@ gboolean UvxGstPipelineVR::handle_input_commands(GIOChannel *source, GIOConditio
         return TRUE;
 
     UvxGstPipelineVR *pVR = (UvxGstPipelineVR*)pobject;
+    gchar cmd = g_ascii_tolower(str[0]);
 
-    switch (g_ascii_tolower(str[0]))
+    if ( cmd == pVR->cfgParams[CAMERA_START_REC_HOTKEY].at(0) )
+        pVR->start_recording();
+    else if ( cmd == pVR->cfgParams[CAMERA_STOP_REC_HOTKEY].at(0) )
+        pVR->stop_recording();
+    else if ( cmd == pVR->cfgParams[CAMERA_QUIT_HOTKEY].at(0) )
     {
-        case 'r':
-            pVR->start_recording();
-            break;
-        case 's':
-            pVR->stop_recording();
-            break;
-        case 'q':
-            g_print("Exiting...\n");
-            g_main_loop_quit(pVR->loopMain);
-            break;
-        default:
-            break;
+        g_print("Exiting...\n");
+        g_main_loop_quit(pVR->loopMain);
     }
     
     g_free(str);
@@ -670,6 +665,9 @@ void UvxGstPipelineVR::init_parameters()
 
     // Create the default parameters map
     cfgParams[CAPTURE_DEV] = "/dev/video0";
+    cfgParams[CAMERA_START_REC_HOTKEY] = "r";
+    cfgParams[CAMERA_STOP_REC_HOTKEY] = "s";
+    cfgParams[CAMERA_QUIT_HOTKEY] = "q";
     cfgParams[IN_PIX_FMT] = "UYVY";
     cfgParams[OUT_PIX_FMT] = "I420";
     cfgParams[STREAMING_ENABLED] = "FALSE";
@@ -695,6 +693,9 @@ void UvxGstPipelineVR::init_parameters()
 
     // Create the map from the parameter names to their internal enumeration representation
     M["CAPTURE_DEV"] = CAPTURE_DEV;
+    M["CAMERA_START_REC_HOTKEY"] = CAMERA_START_REC_HOTKEY;
+    M["CAMERA_STOP_REC_HOTKEY"] = CAMERA_STOP_REC_HOTKEY;
+    M["CAMERA_QUIT_SERVICE_HOTKEY"] = CAMERA_QUIT_HOTKEY;
     M["IN_PIX_FMT"] = IN_PIX_FMT;
     M["OUT_PIX_FMT"] = OUT_PIX_FMT;
     M["STREAMING_ENABLED"] = STREAMING_ENABLED;
